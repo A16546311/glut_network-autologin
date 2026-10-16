@@ -8,6 +8,11 @@
 
 **特别鸣谢[xhzLK123](https://github.com/xhzLK123)提供的登录方法**
 
+> **本仓库 fork 自 [VoidInTheShell/glut_network-autologin](https://github.com/VoidInTheShell/glut_network-autologin)**
+> （原版 v1.3.2）。上游的代码与设计归原作者所有；本仓库仅在其基础上做问题修复，
+> 并已同步更新本文档中的一键安装命令，使其指向本仓库的修复版。
+> 如需同步上游更新：`git fetch upstream && git merge upstream/main`
+
 ---
 
 ## ⚠️ 本目录是修复版（务必先读）
@@ -125,18 +130,21 @@ sh -n install.sh          # install.sh 自身
 ## 快速开始
 
 ### 首次安装：直接执行以下命令安装
+
+> 以下命令指向**本仓库（修复版）**。如果你又 fork 了自己的副本，
+> 请把 URL 中的 `a16546311` 换成你的 GitHub 用户名。
 ```
-sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/VoidInTheShell/glut_network-autologin/refs/heads/main/install.sh)"
+sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/install.sh)"
 ```
 
 ### 升级脚本
 首先卸载旧版本
 ```
-curl -fsSL https://gh-proxy.org/raw.githubusercontent.com/VoidInTheShell/glut_network-autologin/refs/heads/main/uninstall.sh -o uninstall.sh && sh uninstall.sh
+curl -fsSL https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/uninstall.sh -o uninstall.sh && sh uninstall.sh
 ```
 然后安装新版本
 ```
-sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/VoidInTheShell/glut_network-autologin/refs/heads/main/install.sh)"
+sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/install.sh)"
 ```
 ### 命令无法执行时，使用下面的方法安装
 ### 1. 上传脚本到 OpenWrt
@@ -150,7 +158,7 @@ scp install.sh root@[你的路由器IP]]:/tmp/
 # 方法2: 在路由器上使用 wget下载
 # 首先ssh登录到路由器
 cd /tmp
-wget https://gh-proxy.org/raw.githubusercontent.com/VoidInTheShell/glut_network-autologin/refs/heads/main/install.sh
+wget https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/install.sh
 ```
 
 ### 2. 运行安装脚本
@@ -563,7 +571,7 @@ LOG_FILE="logger -t autologin"
 **推荐方式：使用卸载脚本**
 ```sh
 #直接执行以下命令卸载
-sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/VoidInTheShell/glut_network-autologin/refs/heads/main/uninstall.sh)"
+sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/uninstall.sh)"
 
 # 上述命令无法执行时手动下载并上传 uninstall.sh 到路由器
 scp uninstall.sh root@192.168.1.1:/tmp/
