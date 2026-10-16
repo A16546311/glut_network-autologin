@@ -79,18 +79,20 @@ eth2 的 MAC 7c:d3:0a:15:01:c7  ->  报文里发送 7cd30a1501c7
 如果你的环境里 HTTPS 也受限，请把 `check_real_http()` 换成你环境里**唯一可靠**的探测方式。
 判据函数位于 `install.sh` 中 `generate_login_script()` 的 heredoc 内，搜索 `check_real_http` 即可找到。
 
-### 修改后请自检
+### 修改 install.sh 时的注意事项
+
+`login.sh` 并不是独立存在的文件 —— 它由 `install.sh` 里的 **5 段 heredoc 拼接生成**。
+所以**只改路由器上的 `/usr/local/autologin/login.sh` 是没有意义的**，下次重装就会被覆盖；
+所有修复必须回填进 `install.sh` 的 heredoc 里（搜索 `generate_login_script()` 即可定位）。
+
+改动后至少要做一次语法检查：
 
 ```sh
-python3 verify.py
+sh -n install.sh          # install.sh 自身
 ```
 
-它会按 `install.sh` 的拼接规则还原出将要写盘的 `login.sh`，做 `sh -n` 语法检查，
-并与此目录下的 `login.sh.reference`（已在真机验证通过的版本）**逐字节比对**。
-输出 `[通过] 与 login.sh.reference 逐字节一致` 即说明你的改动没有破坏生成结果。
-
-> 改了 `install.sh` 顶部的 `VERSION` / `VERSION_DATE` / `VERSION_DESC` 后，
-> 记得同步修改 `verify.py` 里的同名常量，否则比对会失败。
+若想确认"生成出来的 login.sh 符合预期"，可以在 `install.sh` 中临时搜索 `check_real_http`
+逐项核对，或另建一个只读的还原脚本比对。本目录不再附带校验工具，保持精简。
 
 ### 已知的架构局限（上游设计，未改动）
 
