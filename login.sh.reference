@@ -335,6 +335,34 @@ get_wan_mac() {
     echo "$mac"
 }
 
+
+# 获取 WAN 网卡真实 MAC（12 位十六进制小写，供认证报文使用）
+# 取不到或格式非法时返回空字符串
+#
+# 注意：此处不能用 case 的方括号表达式（如 [0-9a-f][0-9a-f]...），
+#       BusyBox ash 下不生效；也不能用 tr -d '0-9a-f' 反向过滤，
+#       实测 BusyBox 的 tr 对字符范围处理有偏差。故拆成两步：
+#       先 case ??????? 查长度，再用 grep -Eqi 查字符。
+get_wan_mac_hex() {
+    local _raw=$(get_wan_mac)
+    [ -n "$_raw" ] || _raw=$(cat /sys/class/net/"$WAN_INTERFACE"/address 2>/dev/null)
+    local _hex=$(echo "$_raw" | tr -d ':-' | tr '[:upper:]' '[:lower:]')
+
+    # 长度必须为 12
+    case "$_hex" in
+        ????????????) ;;
+        *) echo ""; return ;;
+    esac
+    # 只能由十六进制字符组成
+    echo "$_hex" | grep -Eqi '^[0-9a-f]{12}$' || { echo ""; return; }
+    # 排除全零（无效 MAC）
+    case "$_hex" in
+        000000000000) echo ""; return ;;
+    esac
+
+    echo "$_hex"
+}
+
 # ============ 智能日志系统 ============
 
 # 带级别的日志输出函数
@@ -571,6 +599,15 @@ do_login() {
     # 增加认证尝试计数
     AUTH_ATTEMPT_COUNT=$((AUTH_ATTEMPT_COUNT + 1))
 
+    # 取 WAN 网卡真实 MAC；取不到就放弃本次认证，避免带非法 MAC 打服务器
+    local mac_hex=$(get_wan_mac_hex)
+    if [ -z "$mac_hex" ]; then
+        log_with_level "ERROR" "无法获取 WAN 口 MAC 地址 (接口: $WAN_INTERFACE)"
+        OFFLINE_AUTH_RESPONSE="MAC获取失败"
+        increment_state "CONSECUTIVE_AUTH_FAILURES"
+        return 1
+    fi
+
     if [ -z "$current_ip" ]; then
         log_with_level "ERROR" "无法获取 WAN 口 IP 地址 (接口: $WAN_INTERFACE)"
         OFFLINE_AUTH_RESPONSE="IP获取失败"
@@ -581,7 +618,7 @@ do_login() {
     log_with_level "AUTH" "尝试认证 (第${AUTH_ATTEMPT_COUNT}次) - IP: $current_ip"
 
     # 构建登录 URL
-    local url="http://${AUTH_SERVER}:${AUTH_PORT_801}/eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C0%2C${USER_ACCOUNT}&user_password=${USER_PASSWORD}&wlan_user_ip=${current_ip}&wlan_user_ipv6=&wlan_user_mac=E0D55EFE63F1&wlan_ac_ip=&wlan_ac_name=&page_index=pMnaGv1756888844&authex_enable=${ISP_CHOICE}&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&lang=zh"
+    local url="http://${AUTH_SERVER}:${AUTH_PORT_801}/eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C0%2C${USER_ACCOUNT}&user_password=${USER_PASSWORD}&wlan_user_ip=${current_ip}&wlan_user_ipv6=&wlan_user_mac=${mac_hex}&wlan_ac_ip=&wlan_ac_name=&page_index=pMnaGv1756888844&authex_enable=${ISP_CHOICE}&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&lang=zh"
 
     # 执行登录请求
     local response=$(wget -T 5 -q -O - "$url" 2>&1)
