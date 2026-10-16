@@ -1,6 +1,6 @@
 # 自动登录服务配置文件示例
 #
-# 版本: v1.3.2
+# 版本: v1.4.0
 # 此文件展示了所有可配置的选项
 # 实际配置文件会在安装时自动生成到：/etc/config/autologin
 
@@ -261,20 +261,37 @@ STATE_FILE="/usr/local/autologin/runtime.state"
 #    - 仅启用必要的检测方法
 #    - 适当调整告警阈值，减少不必要的告警
 
-# 9. v1.3.2 更新说明：
+# 9. v1.4.0 更新说明（当前版本）：
+#    - 重写在线状态判据：原 /drcom/chkstatus 接口已废弃（TCP 连上后挂起至超时），
+#      现改用 HTTPS 探测 + 公网 DNS 直连查询，解决"实际在线却恒判离线"
+#    - do_login 成功判定放宽：识别 "result":1 与「Portal协议认证成功！」
+#      （原仅认 success，导致每次成功认证都被记成失败）
+#    - 接通 ONLINE_VERIFY_STRATEGY：该开关此前从未被 login.sh 引用，
+#      恢复判据被硬编码；现按 1=仅DNS / 2=DNS+HTTP 真正生效
+#    - 认证报文中的 MAC 改为取 WAN 网卡真实 MAC（原写死为 000000000000）
+#      取不到合法 MAC 时放弃本次认证并记 ERROR，不再带非法值请求服务器
+#    - 恢复判据容忍"不确定"，避免单个判据失效即卡死状态机
+#    - 检测间隔 2s -> 10s，消除离线空转刷屏
+#    - 修正行尾符：仓库内统一 LF 并加入 .gitattributes，
+#      避免 autocrlf=true 环境签出 CRLF 后 sh install.sh 报错
+
+# 10. v1.3.2 更新说明：
 #    - 新增 OFFLINE_AUTH_MAX_ATTEMPTS 参数（离线最大认证次数）
 #    - 新增 OFFLINE_COOLDOWN_SECONDS 参数（冷却时间）
 #    - 修复 wget 命令 BusyBox 兼容性（GNU长选项改为短选项）
 #    - 修复 /tmp 目录重启后消失问题（自动创建）
 #    - 修复 read -p 和 echo -e 命令兼容性问题
-#
-# 10. v1.3.1 更新说明：
+
+# 11. v1.3.1 更新说明：
 #    - 新增 OFFLINE_AUTH_INTERVAL 和 OFFLINE_HTTP_CHECK_INTERVAL 参数
 #    - 新增 LOG_SUSPECT_STATE 参数（控制疑似离线日志记录）
 #    - 废弃 AUTH_HTTP_CHECK_INTERVAL（仅保留用于兼容）
 #    - 修复 runtime.state 初始化和字段排序问题
 
 # ==================== 配置兼容性 ====================
+
+# v1.4.0+ 新增配置项：
+#   （无新增；ONLINE_VERIFY_STRATEGY 自本版起真正生效）
 
 # v1.3.2+ 新增配置项：
 #   OFFLINE_AUTH_MAX_ATTEMPTS, OFFLINE_COOLDOWN_SECONDS

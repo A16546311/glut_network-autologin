@@ -3,16 +3,16 @@
 # OpenWrt 自动登录服务安装脚本
 # 自动检测环境、安装依赖、配置服务
 #
-# 版本: v1.3.2 (2026-01-02)
-# 更新: BusyBox兼容性修复与离线认证保护
+# 版本: v1.4.0 (2026-10-16)
+# 更新: 在线判据重写 + 认证报文 MAC 动态化 + 策略开关接通 + 行尾规范化
 #
 
 set -e
 
 # 版本信息
-VERSION="v1.3.2"
-VERSION_DATE="2026-01-02"
-VERSION_DESC="BusyBox兼容性修复与离线认证保护"
+VERSION="v1.4.0"
+VERSION_DATE="2026-10-16"
+VERSION_DESC="在线判据重写与认证报文MAC动态化"
 
 INSTALL_DIR="/usr/local/autologin"
 CONFIG_FILE="/etc/config/autologin"
