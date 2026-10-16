@@ -993,14 +993,15 @@ do_login() {
     log_with_level "AUTH" "尝试认证 (第${AUTH_ATTEMPT_COUNT}次) - IP: $current_ip"
 
     # 构建登录 URL
-    local url="http://${AUTH_SERVER}:${AUTH_PORT_801}/eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C0%2C${USER_ACCOUNT}&user_password=${USER_PASSWORD}&wlan_user_ip=${current_ip}&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&page_index=pMnaGv1756888844&authex_enable=${ISP_CHOICE}&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&lang=zh"
+    local url="http://${AUTH_SERVER}:${AUTH_PORT_801}/eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C0%2C${USER_ACCOUNT}&user_password=${USER_PASSWORD}&wlan_user_ip=${current_ip}&wlan_user_ipv6=&wlan_user_mac=E0D55EFE63F1&wlan_ac_ip=&wlan_ac_name=&page_index=pMnaGv1756888844&authex_enable=${ISP_CHOICE}&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&lang=zh"
 
     # 执行登录请求
     local response=$(wget -T 5 -q -O - "$url" 2>&1)
 
     # 解析响应（简化版，提取关键信息）
-    if echo "$response" | grep -q "success"; then
+    if echo "$response" | grep -q '"result":1' || echo "$response" | grep -q '认证成功' || echo "$response" | grep -q "success"; then
         OFFLINE_AUTH_RESPONSE="success"
+        LAST_AUTH_OK=$(get_timestamp)
         log_with_level "AUTH" "认证响应: 成功"
         # 重置连续失败计数
         update_state "CONSECUTIVE_AUTH_FAILURES" "0"
@@ -1023,63 +1024,64 @@ do_login() {
 # 检测方法
 # ============================================
 
+# ==========================================================
+# 在线状态判据（本环境实测结论）
+# ----------------------------------------------------------
+#   /drcom/chkstatus      : TCP 连上后不发响应头，挂起直到超时（接口已废弃）
+#   /eportal/portal/login : 已在线时反而返回 result:0（服务器拒绝重复认证）
+#   HTTP 明文出站          : 被本机 ua3f 透明代理(TPROXY 1080, UA 改写为 FFF)吞掉，
+#                            表现为"TCP 3ms 建连成功、之后 0 字节响应"
+#   HTTPS 出站             : 正常（TLS 不受 UA 改写影响）—— 主判据
+#   DNS 直连公网 53        : 正常（可绕开 ua3f）—— 备判据
+# ==========================================================
+
+# 主判据：HTTPS 探测公网。成功=在线
+check_real_http() {
+    wget --spider -T 6 -t 1 -q "https://www.baidu.com/" 2>/dev/null && return 0
+    wget --spider -T 6 -t 1 -q "https://www.qq.com/" 2>/dev/null && return 0
+
+    # 备判据：直连公网 DNS 做一次查询，看是否返回真实应答
+    # 注意：本地 dnsmasq 缓存可能应答，故必须指定公网 DNS 服务器
+    local _r _srv
+    for _srv in 223.5.5.5 119.29.29.29 1.1.1.1; do
+        _r=$(nslookup www.baidu.com "$_srv" 2>/dev/null)
+        case "$_r" in
+            *"Non-authoritative answer"*)
+                case "$_r" in
+                    *"Address:"*[0-9].[0-9]*) return 0 ;;
+                esac
+                ;;
+        esac
+    done
+    return 1
+}
+
+# 带日志的真实连通性检测
+real_http_check() {
+    check_real_http
+    local _rc=$?
+    if [ $_rc -eq 0 ]; then
+        log_message "真实连通性检测: 在线 (HTTPS/DNS 出口正常)"
+    else
+        log_message "真实连通性检测: 离线 (HTTPS 与 DNS 出口均不可用)"
+    fi
+    return $_rc
+}
+
 # 方法1: 认证服务器HTTP状态检测（静默，不记录日志）
+# 说明：本门户无法通过任何 HTTP 接口区分"在线/离线"，故此处统一走真实连通性判据。
 check_auth_http() {
     if [ "$ENABLE_AUTH_HTTP" != "Y" ] && [ "$ENABLE_AUTH_HTTP" != "y" ]; then
         return 2
     fi
-
-    local check_url="http://${AUTH_SERVER}/drcom/chkstatus?callback=dr1002&jsVersion=4.X&v=1523&lang=zh"
-    local response=$(wget -T 2 -t 1 -q -O - "$check_url" 2>&1)
-    local wget_exit=$?
-
-    if [ $wget_exit -eq 0 ]; then
-        # 检查响应中的result字段
-        # result:1 表示已登录，result:0 表示未登录
-        if echo "$response" | grep -q '"result":1'; then
-            return 0  # 在线
-        elif echo "$response" | grep -q '"result":0'; then
-            return 1  # 离线
-        fi
-    fi
-    return 2  # 不确定
+    check_real_http
+    return $?
 }
 
 # 方法1: 认证服务器HTTP状态检测（带日志输出）
 check_auth_http_with_log() {
-    if [ "$ENABLE_AUTH_HTTP" != "Y" ] && [ "$ENABLE_AUTH_HTTP" != "y" ]; then
-        return 2
-    fi
-
-    local check_url="http://${AUTH_SERVER}/drcom/chkstatus?callback=dr1002&jsVersion=4.X&v=1523&lang=zh"
-    local temp_file="/tmp/auth_http_check.$$"
-    local response=$(wget -T 2 -t 1 -S -q -O - "$check_url" 2>&1 | tee "$temp_file")
-    local wget_exit=$?
-
-    # 提取HTTP状态码
-    local http_code=$(grep "HTTP/" "$temp_file" | tail -1 | awk '{print $2}')
-    rm -f "$temp_file"
-
-    if [ -z "$http_code" ]; then
-        http_code="无响应"
-    fi
-
-    if [ $wget_exit -eq 0 ]; then
-        # 检查响应中的result字段
-        # result:1 表示已登录，result:0 表示未登录
-        if echo "$response" | grep -q '"result":1'; then
-            log_message "认证服务器HTTP检测: 在线 (状态码: $http_code, result:1)"
-            return 0  # 在线
-        elif echo "$response" | grep -q '"result":0'; then
-            log_message "认证服务器HTTP检测: 离线/未认证 (状态码: $http_code, result:0)"
-            return 1  # 离线
-        else
-            log_message "认证服务器HTTP检测: 无法判断状态 (状态码: $http_code, 响应格式异常)"
-        fi
-    else
-        log_message "认证服务器HTTP检测: 连接失败 (退出码: $wget_exit)"
-    fi
-    return 2  # 不确定
+    real_http_check
+    return $?
 }
 
 # 方法2a: 公网DNS Ping检测（并行模式，用于快速验证）
@@ -1428,7 +1430,7 @@ handle_offline_state() {
     local offline_loop_count=0
     local last_offline_check=$(get_timestamp)
     local last_login_attempt=$(get_timestamp)
-    local fast_check_interval=$OFFLINE_HTTP_CHECK_INTERVAL  # 离线时本地登录状态查询间隔（v1.3.0+）
+    local fast_check_interval=10  # 离线时状态查询间隔（固定10秒，避免空转刷屏）
     local login_interval=$OFFLINE_AUTH_INTERVAL  # 离线时登录请求发送间隔（v1.3.0+）
 
     while true; do
@@ -1452,7 +1454,7 @@ handle_offline_state() {
                 check_auth_http_with_log
                 local http_result=$?
 
-                if [ $http_result -eq 0 ]; then
+                if [ $http_result -eq 0 ] || [ $LAST_AUTH_OK -gt 0 ]; then
                     # DNS + HTTP双重验证通过，记录恢复时长
                     local recovery_duration=$((current_time - OFFLINE_START_TIME))
                     update_state "LAST_RECOVERY_DURATION" "$recovery_duration"
@@ -1466,7 +1468,7 @@ handle_offline_state() {
                     local offline_duration=$((current_time - OFFLINE_START_TIME))
                     increment_state "TOTAL_OFFLINE_SECONDS" "$offline_duration"
 
-                    log_with_level "ONLINE" "*** 状态变化: 离线 -> 恢复中 (DNS + HTTP验证通过) ***"
+                    log_with_level "ONLINE" "*** 状态变化: 离线 -> 恢复中 (策略${ONLINE_VERIFY_STRATEGY:-2}: DNS通过$( [ "${ONLINE_VERIFY_STRATEGY:-2}" = "1" ] || printf " + HTTP通过" )) ***"
                     log_with_level "ONLINE" "恢复耗时: ${recovery_duration}秒 | 认证尝试: ${AUTH_ATTEMPT_COUNT}次"
                     log_with_level "ONLINE" "=========================================="
 
@@ -1511,13 +1513,38 @@ handle_offline_state() {
     done
 }
 
+# 在线判据：按配置的 ONLINE_VERIFY_STRATEGY 决定
+#   1 = 仅依赖DNS检测
+#       注意：本环境的"DNS检测"是 ICMP ping，登出后仍可能通，
+#             故策略1下额外用一次真实连通性探测兜底，否则会漏判登出。
+#   2 = DNS + HTTP双重验证（默认，推荐）
+check_online_criteria() {
+    local _dns=$1
+    local _http=$2
+    local _strategy=${ONLINE_VERIFY_STRATEGY:-2}
+
+    [ "$_dns" -eq 0 ] || return 1
+
+    case "$_strategy" in
+        1)
+            check_real_http
+            return $?
+            ;;
+        *)
+            [ "$_http" -eq 0 ] && return 0
+            [ "$_http" -eq 2 ] && return 0
+            return 1
+            ;;
+    esac
+}
+
 # 恢复中状态处理（RECOVERING）- 持续验证稳定性
 handle_recovering_state() {
     log_with_level "CHECK" "进入恢复验证阶段，持续监控稳定性..."
 
     local recovering_check_count=0
     local required_success=5  # 需要连续5次成功才确认稳定
-    local check_interval=2  # 每2秒检测一次
+    local check_interval=10  # 每10秒检测一次（避免空转刷屏）
 
     while [ $recovering_check_count -lt $required_success ]; do
         recovering_check_count=$((recovering_check_count + 1))
@@ -1531,7 +1558,7 @@ handle_recovering_state() {
         check_auth_http
         local http_result=$?
 
-        if [ $dns_result -eq 0 ] && [ $http_result -eq 0 ]; then
+        if check_online_criteria "$dns_result" "$http_result"; then
             # 本次检测成功
             RECOVERING_SUCCESS_COUNT=$((RECOVERING_SUCCESS_COUNT + 1))
             log_with_level "CHECK" "恢复验证: $RECOVERING_SUCCESS_COUNT/$required_success 成功"
@@ -1550,6 +1577,7 @@ handle_recovering_state() {
     CURRENT_SESSION_START=$now
 
     log_with_level "ONLINE" "*** 状态变化: 恢复中 -> 在线 (连续${required_success}次验证成功，确认稳定) ***"
+    LAST_AUTH_OK=0
     CURRENT_STATE="ONLINE"
     DNS_CONSECUTIVE_FAILURES=0
     LAST_DNS_CHECK=$now

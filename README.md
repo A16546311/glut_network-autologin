@@ -8,6 +8,73 @@
 
 **特别鸣谢[xhzLK123](https://github.com/xhzLK123)提供的登录方法**
 
+---
+
+## ⚠️ 本目录是修复版（务必先读）
+
+本目录在原版 v1.3.2 基础上修复了「**实际在线却被判离线**」的问题，并修正了行尾符。
+**直接 `sh install.sh` 即可安装**，行为已在本校网关（10.10.11.11，ePortal/DrCOM）上实测验证。
+
+### 快速安装
+
+```sh
+sh install.sh
+```
+
+安装过程是交互式的，只有 4 处必须填：
+
+| 提示 | 填什么 |
+|---|---|
+| `是否继续安装? (y/n):` | `y` |
+| `是否使用此接口? (Y/n):` | 自动检测到的 WAN 接口正确就回车（本项目实测为 `eth2`） |
+| `请输入登录账号:` | 你的账号 |
+| `请输入登录密码:` | 你的密码（不回显，正常现象） |
+| `请选择策略 (1/2) [默认: 1]:` | 运营商：`1`=联通 `2`=移动 |
+
+其余全部回车用默认值即可。
+
+### 修复了什么
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | **`/drcom/chkstatus` 状态接口已废弃** —— TCP 连上后不发响应头，挂起直到超时，导致状态检测恒为"不确定" | 弃用该接口，改用 **HTTPS 探测 + 公网 DNS 直连查询** 作为在线判据 |
+| 2 | **`/eportal/portal/login` 不能当判据** —— 已在线时反而返回 `result:0`（服务器拒绝重复认证） | 不再用它判在线 |
+| 3 | **`do_login` 成功判定错误** —— 只认 `success`，而本网关成功时返回 `"result":1` 与「Portal协议认证成功！」，导致每次成功都被记成失败 | 判定放宽为 `"result":1` / `认证成功` / `success` |
+| 4 | **`ONLINE_VERIFY_STRATEGY` 是死配置** —— 安装时选的"仅DNS / DNS+HTTP"从未被 `login.sh` 引用，恢复判据被硬编码 | 新增 `check_online_criteria()`，让该开关真正生效 |
+| 5 | **恢复阶段被单个判据卡死** —— 判据恒为"不确定"时永远回不到 ONLINE | 恢复判据容忍"不确定"，并按策略分派 |
+| 6 | **空转刷屏** —— 离线时每 2 秒打印一次，日志迅速膨胀 | 检测间隔 2 秒 → 10 秒 |
+| 7 | **行尾符是 CRLF** —— 仓库里 commit 的就是 CRLF，导致 `sh install.sh` 报 `: not found` / `set: illegal option -` | 全部转为 LF，并加入 `.gitattributes` |
+
+### 若你的网络环境不同
+
+修复项 1、2 源于「**HTTP 明文出站被本机透明代理 `ua3f` 吞掉 + 门户只放行 login 接口**」这一环境特征，判据选用：
+
+- **主判据**：`wget --spider https://www.baidu.com/`（TLS 不受 UA 改写影响）
+- **备判据**：`nslookup www.baidu.com 223.5.5.5` 是否返回真实应答（明确指定公网 DNS，避开本地 dnsmasq 缓存）
+
+如果你的环境里 HTTPS 也受限，请把 `check_real_http()` 换成你环境里**唯一可靠**的探测方式。
+判据函数位于 `install.sh` 中 `generate_login_script()` 的 heredoc 内，搜索 `check_real_http` 即可找到。
+
+### 修改后请自检
+
+```sh
+python3 verify.py
+```
+
+它会按 `install.sh` 的拼接规则还原出将要写盘的 `login.sh`，做 `sh -n` 语法检查，
+并与此目录下的 `login.sh.reference`（已在真机验证通过的版本）**逐字节比对**。
+输出 `[通过] 与 login.sh.reference 逐字节一致` 即说明你的改动没有破坏生成结果。
+
+> 改了 `install.sh` 顶部的 `VERSION` / `VERSION_DATE` / `VERSION_DESC` 后，
+> 记得同步修改 `verify.py` 里的同名常量，否则比对会失败。
+
+### 已知的架构局限（上游设计，未改动）
+
+- `handle_online_state` 在 ONLINE 状态下**只做 ICMP ping**，不校验认证状态。本校园网的 ICMP 在登出后仍然通畅，
+  因此**认证掉线到被发现之间存在延迟**（最坏约 `2 × DNS_CHECK_INTERVAL` 秒后进入 SUSPECT，再由并行检测确认）。
+  这是判据能力的上限，不是 bug。
+- `AUTH_HTTP_CHECK_INTERVAL` 已废弃但仍保留在配置文件里，仅作兼容。
+
 ## 功能特性
 
 - ✅ 交互式配置（账号、密码、检测频率、日志选项）
