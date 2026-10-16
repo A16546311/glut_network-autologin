@@ -24,7 +24,7 @@
 ### 快速安装
 
 ```sh
-sh install.sh
+sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/a16546311/glut_network-autologin/refs/heads/main/install.sh)"
 ```
 
 安装过程是交互式的，只有 4 处必须填：
