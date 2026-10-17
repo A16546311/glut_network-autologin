@@ -4,7 +4,7 @@
 
 > 在OpenWRT上部署，然后忘掉校园网要登录这件事~
 
-**当前版本**: v1.4.0 (2026-10-16)
+**当前版本**: v1.5.0 (2026-10-17)
 
 **特别鸣谢[xhzLK123](https://github.com/xhzLK123)提供的登录方法**
 
@@ -51,6 +51,8 @@ sh -c "$(curl -fsSLk https://gh-proxy.org/raw.githubusercontent.com/a16546311/gl
 | 6 | **空转刷屏** —— 离线时每 2 秒打印一次，日志迅速膨胀 | 检测间隔 2 秒 → 10 秒 |
 | 7 | **认证报文里的 MAC 是写死的** —— 原脚本硬编码 `wlan_user_mac=000000000000`（被改成了某台 PC 的 MAC），报文里的 MAC 与实际网卡不符 | 新增 `get_wan_mac_hex()`，从 WAN 网卡动态读取真实 MAC；取不到合法值时放弃本次认证并记 ERROR |
 | 8 | **行尾符是 CRLF** —— 在 `core.autocrlf=true` 的机器上签出后 `sh install.sh` 报 `: not found` / `set: illegal option -` | 加入 `.gitattributes`（`* text=auto eol=lf`），保证任何平台签出都是 LF |
+| 9 | **在线判据在"已下线"时仍误判在线**（v1.4.0 引入）—— ①`nslookup` 兜底被门户 DNS 劫持骗过（返回伪造地址 `8.8.9.9`）；②`wget --spider` 只看连接是否建立，被门户空响应骗过 | 移除 DNS 兜底与 `--spider`，改为**取回 HTTPS 内容并校验长度/门户特征**；实测在线 2443+ 字节、下线 0 字节 |
+| 10 | **ONLINE 状态从不校验 HTTP** —— 下线后若 ICMP 仍通，会长期停在"假在线"而不重新认证 | ONLINE 状态新增每 120 秒 HTTPS 复验，失败即转 OFFLINE 触发重登 |
 
 ### 关于 MAC 动态化（第 7 项）
 

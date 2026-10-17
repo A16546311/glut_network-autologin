@@ -3,16 +3,16 @@
 # OpenWrt 自动登录服务安装脚本
 # 自动检测环境、安装依赖、配置服务
 #
-# 版本: v1.4.0 (2026-10-16)
-# 更新: 在线判据重写 + 认证报文 MAC 动态化 + 策略开关接通 + 行尾规范化
+# 版本: v1.5.0 (2026-10-17)
+# 更新: 在线判据改为HTTPS内容校验并移除DNS兜底
 #
 
 set -e
 
 # 版本信息
-VERSION="v1.4.0"
-VERSION_DATE="2026-10-16"
-VERSION_DESC="在线判据重写与认证报文MAC动态化"
+VERSION="v1.5.0"
+VERSION_DATE="2026-10-17"
+VERSION_DESC="在线判据改为HTTPS内容校验并移除DNS兜底"
 
 INSTALL_DIR="/usr/local/autologin"
 CONFIG_FILE="/etc/config/autologin"
@@ -1065,31 +1065,41 @@ do_login() {
 # 在线状态判据（本环境实测结论）
 # ----------------------------------------------------------
 #   /drcom/chkstatus      : TCP 连上后不发响应头，挂起直到超时（接口已废弃）
-#   /eportal/portal/login : 已在线时反而返回 result:0（服务器拒绝重复认证）
-#   HTTP 明文出站          : 被本机 ua3f 透明代理(TPROXY 1080, UA 改写为 FFF)吞掉，
-#                            表现为"TCP 3ms 建连成功、之后 0 字节响应"
-#   HTTPS 出站             : 正常（TLS 不受 UA 改写影响）—— 主判据
-#   DNS 直连公网 53        : 正常（可绕开 ua3f）—— 备判据
+#   /eportal/portal/login : 已在线时反而返回 result:0；下线后返回「请先配置套餐组」
+#                           两种情况都是 result:0，无法区分，不能用来判在线
+#   HTTP 明文出站          : 被本机 ua3f 透明代理(TPROXY 1080, UA 改写为 FFF)吞掉
+#   ping 公网 DNS          : 下线后 ICMP 仍可能通，不可靠
+#   nslookup 公网 DNS      : 【下线后仍会返回伪造应答】—— 门户 DNS 劫持，
+#                            实测返回 Address: 8.8.9.9 这种假地址，绝不可用
+#   HTTPS 响应体内容       : 在线 2443+ 字节真实页面；下线 0 字节
+#
+# 结论：只用「HTTPS 取回真实内容」这一个判据，且必须校验内容长度/特征，
+#       不能用 --spider（它只看能否建立连接，会被空响应骗过）。
 # ==========================================================
 
-# 主判据：HTTPS 探测公网。成功=在线
 check_real_http() {
-    wget --spider -T 6 -t 1 -q "https://www.baidu.com/" 2>/dev/null && return 0
-    wget --spider -T 6 -t 1 -q "https://www.qq.com/" 2>/dev/null && return 0
+    local _tmp="/tmp/.autologin_probe.$$"
+    local _n=0 _u=""
 
-    # 备判据：直连公网 DNS 做一次查询，看是否返回真实应答
-    # 注意：本地 dnsmasq 缓存可能应答，故必须指定公网 DNS 服务器
-    local _r _srv
-    for _srv in 223.5.5.5 119.29.29.29 1.1.1.1; do
-        _r=$(nslookup www.baidu.com "$_srv" 2>/dev/null)
-        case "$_r" in
-            *"Non-authoritative answer"*)
-                case "$_r" in
-                    *"Address:"*[0-9].[0-9]*) return 0 ;;
-                esac
-                ;;
-        esac
+    for _u in "https://www.baidu.com/" "https://www.qq.com/" "https://www.bing.com/"; do
+        rm -f "$_tmp"
+        wget -T 6 -t 1 -q -O "$_tmp" "$_u" 2>/dev/null
+        _n=$(wc -c < "$_tmp" 2>/dev/null || echo 0)
+
+        # 1) 内容必须足够大：门户拦截页/空响应都很小（实测下线为 0 字节）
+        if [ "$_n" -ge 500 ]; then
+            # 2) 不能是门户/认证页面
+            if ! grep -qiE 'eportal|/portal/|认证系统|请先登录|校园网认证' "$_tmp" 2>/dev/null; then
+                rm -f "$_tmp"
+                return 0
+            fi
+            log_message "在线判据: $_u 返回疑似门户页面（${_n}字节），继续探测下一个"
+        else
+            log_message "在线判据: $_u 响应过小（${_n}字节），判定不可用"
+        fi
     done
+
+    rm -f "$_tmp"
     return 1
 }
 
@@ -1098,15 +1108,15 @@ real_http_check() {
     check_real_http
     local _rc=$?
     if [ $_rc -eq 0 ]; then
-        log_message "真实连通性检测: 在线 (HTTPS/DNS 出口正常)"
+        log_message "真实连通性检测: 在线 (HTTPS 返回真实内容)"
     else
-        log_message "真实连通性检测: 离线 (HTTPS 与 DNS 出口均不可用)"
+        log_message "真实连通性检测: 离线 (HTTPS 无有效响应，门户可能已要求重新认证)"
     fi
     return $_rc
 }
 
 # 方法1: 认证服务器HTTP状态检测（静默，不记录日志）
-# 说明：本门户无法通过任何 HTTP 接口区分"在线/离线"，故此处统一走真实连通性判据。
+# 说明：本门户无法通过任何 HTTP 状态接口区分"在线/离线"，故统一走真实连通性判据。
 check_auth_http() {
     if [ "$ENABLE_AUTH_HTTP" != "Y" ] && [ "$ENABLE_AUTH_HTTP" != "y" ]; then
         return 2
@@ -1380,6 +1390,20 @@ check_public_ping_with_log() {
 handle_online_state() {
     # 定期输出状态摘要
     periodic_stat_summary
+
+    # 低频真实连通性复验：DNS 轮询可能被 ICMP 放行骗过，必须独立校验一次 HTTP
+    if [ "${ONLINE_VERIFY_STRATEGY:-2}" = "2" ]; then
+        local _now=$(get_timestamp)
+        local _since_last=$((_now - LAST_HTTP_CHECK))
+        if [ "$_since_last" -ge 120 ]; then
+            LAST_HTTP_CHECK=$_now
+            if ! check_real_http; then
+                log_with_level "OFFLINE" "*** 状态变化: 在线 -> 离线 (HTTP复验失败，可能已被强制下线) ***"
+                CURRENT_STATE="OFFLINE"
+                return
+            fi
+        fi
+    fi
 
     local current_time=$(get_timestamp)
 

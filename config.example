@@ -1,6 +1,6 @@
 # 自动登录服务配置文件示例
 #
-# 版本: v1.4.0
+# 版本: v1.5.0
 # 此文件展示了所有可配置的选项
 # 实际配置文件会在安装时自动生成到：/etc/config/autologin
 
@@ -261,9 +261,20 @@ STATE_FILE="/usr/local/autologin/runtime.state"
 #    - 仅启用必要的检测方法
 #    - 适当调整告警阈值，减少不必要的告警
 
-# 9. v1.4.0 更新说明（当前版本）：
+# 9. v1.5.0 更新说明（当前版本）：
+#    - 修正在线判据的一个严重误判：原判据在"已下线"时仍会判定在线
+#      · 移除 nslookup 兜底 —— 下线后门户会做 DNS 劫持，仍返回
+#        "Non-authoritative answer" 且 Address 是伪造地址（实测 8.8.9.9 这种假记录）
+#      · 不再使用 wget --spider —— 它只看连接是否建立，会被门户空响应骗过
+#      · 改为「HTTPS 取回内容 + 校验内容长度/门户特征」：
+#        在线实测 2443+ 字节真实页面，下线实测 0 字节
+#    - ONLINE 状态新增每 120 秒的 HTTPS 复验（策略=2 时启用），
+#      避免下线后 ICMP 仍通导致长期停在"假在线"而不重新认证
+#    - 实测效果：主动注销后 16 秒内正确识别离线，立即重新认证并恢复上线
+
+# 10. v1.4.0 更新说明：
 #    - 重写在线状态判据：原 /drcom/chkstatus 接口已废弃（TCP 连上后挂起至超时），
-#      现改用 HTTPS 探测 + 公网 DNS 直连查询，解决"实际在线却恒判离线"
+#      解决"实际在线却恒判离线"
 #    - do_login 成功判定放宽：识别 "result":1 与「Portal协议认证成功！」
 #      （原仅认 success，导致每次成功认证都被记成失败）
 #    - 接通 ONLINE_VERIFY_STRATEGY：该开关此前从未被 login.sh 引用，
@@ -275,20 +286,23 @@ STATE_FILE="/usr/local/autologin/runtime.state"
 #    - 修正行尾符：仓库内统一 LF 并加入 .gitattributes，
 #      避免 autocrlf=true 环境签出 CRLF 后 sh install.sh 报错
 
-# 10. v1.3.2 更新说明：
+# 11. v1.3.2 更新说明：
 #    - 新增 OFFLINE_AUTH_MAX_ATTEMPTS 参数（离线最大认证次数）
 #    - 新增 OFFLINE_COOLDOWN_SECONDS 参数（冷却时间）
 #    - 修复 wget 命令 BusyBox 兼容性（GNU长选项改为短选项）
 #    - 修复 /tmp 目录重启后消失问题（自动创建）
 #    - 修复 read -p 和 echo -e 命令兼容性问题
 
-# 11. v1.3.1 更新说明：
+# 12. v1.3.1 更新说明：
 #    - 新增 OFFLINE_AUTH_INTERVAL 和 OFFLINE_HTTP_CHECK_INTERVAL 参数
 #    - 新增 LOG_SUSPECT_STATE 参数（控制疑似离线日志记录）
 #    - 废弃 AUTH_HTTP_CHECK_INTERVAL（仅保留用于兼容）
 #    - 修复 runtime.state 初始化和字段排序问题
 
 # ==================== 配置兼容性 ====================
+
+# v1.5.0+ 新增配置项：
+#   （无新增；修正在线判据误判，属缺陷修复）
 
 # v1.4.0+ 新增配置项：
 #   （无新增；ONLINE_VERIFY_STRATEGY 自本版起真正生效）
